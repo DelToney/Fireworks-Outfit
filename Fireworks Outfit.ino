@@ -27,7 +27,7 @@
 Adafruit_LSM303_Accel_Unified sensoor = Adafruit_LSM303_Accel_Unified(54321);
 
 #define NUM_LEDS 22
-#define LED_STRING_1 12
+#define LED_STRING_1 10
 #define LED_STRING_2 6
 #define LED_STRING_3 7
 const int ringStartDelayInit = 4259;
