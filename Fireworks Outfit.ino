@@ -1,134 +1,290 @@
-#include <Adafruit_NeoPixel.h>
-#ifdef __AVR__
-  #include <avr/power.h>
-#endif
+/* to-do list:
+ *  
+ *  make DoLeds Modulaur
+ *    Fix any led_string1's
+ *    add a "firework number" inou\\put
+ *    make ring selector an array
+ *    make rinng time a 2D array
+ *    make starting colors a 2D array
+ *  make DoBigLeds actually functional
+ *    Coppy the ode once you make doLeds work the way ou want
+ *    
+ *  minimize globals so theres actuallyenough space
+ *  
+ *  COMMENT. YOUR FUCKING. SHIT.
+ *  
+ *  
+ *  
+ *  HO.
+ */
 
-#define PIN 6
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_LSM303_U.h>
+#include <FastLED.h>
+#include <math.h>
 
-// Parameter 1 = number of pixels in strip
-// Parameter 2 = Arduino pin number (most are valid)
-// Parameter 3 = pixel type flags, add together as needed:
-//   NEO_KHZ800  800 KHz bitstream (most NeoPixel products w/WS2812 LEDs)
-//   NEO_KHZ400  400 KHz (classic 'v1' (not v2) FLORA pixels, WS2811 drivers)
-//   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
-//   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
-//   NEO_RGBW    Pixels are wired for RGBW bitstream (NeoPixel RGBW products)
-Adafruit_NeoPixel strip = Adafruit_NeoPixel(60, PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_LSM303_Accel_Unified sensoor = Adafruit_LSM303_Accel_Unified(54321);
 
-// IMPORTANT: To reduce NeoPixel burnout risk, add 1000 uF capacitor across
-// pixel power leads, add 300 - 500 Ohm resistor on first pixel's data input
-// and minimize distance between Arduino and first pixel.  Avoid connecting
-// on a live circuit...if you must, connect GND first.
+#define NUM_LEDS 22
+#define LED_STRING_1 12
+#define LED_STRING_2 6
+#define LED_STRING_3 7
+const int ringStartDelayInit = 4259;
+const int ringDelayInit = 100;
+const int fadeSpeedInit = 5;
+
+CRGB led_string1[NUM_LEDS];
+//CRGB led_string2[NUM_LEDS];
+//CRGB led_string3[NUM_LEDS];
+int ringStartDelay = 4259;
+int ringDelay = 100;
+long ringTime [NUM_LEDS];
+int startingColors[3];
+int fadeSpeed = 5;
+long currentTime;
+int ringSelector = 0;
+
+
+int acceleration[15] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
+int avgAccel;
+int currentAccInd;
+
 
 void setup() {
-  // This is for Trinket 5V 16MHz, you can remove these three lines if you are not using a Trinket
-  #if defined (__AVR_ATtiny85__)
-    if (F_CPU == 16000000) clock_prescale_set(clock_div_1);
-  #endif
-  // End of trinket special code
+  // put your setup code here, to run once:
+  FastLED.addLeds<NEOPIXEL, LED_STRING_1>(led_string1, NUM_LEDS);
+  //  FastLED.addLeds<NEOPIXEL, LED_STRING_2>(led_string2, NUM_LEDS);
+  //  FastLED.addLeds<NEOPIXEL, LED_STRING_3>(led_string3, NUM_LEDS);
 
-  strip.begin();
-  strip.setBrightness(50);
-  strip.show(); // Initialize all pixels to 'off'
+
+
+  Serial.begin(9600);
+  Wire.begin();
+
+  sensoor.begin();
+
+  displaySensorDetails();
+  delay(1000);
+
+  startingColors[0] = 180;
+  startingColors[1] = 255;
+  startingColors[2] = 0;
+
+
+  for (int i = 1; i < NUM_LEDS; i++) {
+    led_string1[i].setRGB( 0, 0, 0);
+    //    led_string2[i].setRGB( 185, 185, 185);
+    //    led_string3[i].setRGB( 185, 185, 185);
+  }
+  for (int i = 0; i < NUM_LEDS; i++) {
+    ringTime[i] = 0;
+  }
 }
+
+
+
+
+
 
 void loop() {
-  // Some example procedures showing how to display to the pixels:
-  colorWipe(strip.Color(255, 0, 0), 50); // Red
-  colorWipe(strip.Color(0, 255, 0), 50); // Green
-  colorWipe(strip.Color(0, 0, 255), 50); // Blue
-//colorWipe(strip.Color(0, 0, 0, 255), 50); // White RGBW
-  // Send a theater pixel chase in...
-  theaterChase(strip.Color(127, 127, 127), 50); // White
-  theaterChase(strip.Color(127, 0, 0), 50); // Red
-  theaterChase(strip.Color(0, 0, 127), 50); // Blue
-
-  rainbow(20);
-  rainbowCycle(20);
-  theaterChaseRainbow(50);
-}
-
-// Fill the dots one after the other with a color
-void colorWipe(uint32_t c, uint8_t wait) {
-  for(uint16_t i=0; i<strip.numPixels(); i++) {
-    strip.setPixelColor(i, c);
-    strip.show();
-    delay(wait);
+  // put your main code here, to run repeatedly:
+  for (int i = 0; i < 5; i++) {
+    doLEDs(led_string1);
+    delay (33);
   }
+  calSpeed();
+  Serial.print("test");
+  //  calAvgAccel();
+
 }
 
-void rainbow(uint8_t wait) {
-  uint16_t i, j;
 
-  for(j=0; j<256; j++) {
-    for(i=0; i<strip.numPixels(); i++) {
-      strip.setPixelColor(i, Wheel((i+j) & 255));
-    }
-    strip.show();
-    delay(wait);
-  }
-}
 
-// Slightly different, this makes the rainbow equally distributed throughout
-void rainbowCycle(uint8_t wait) {
-  uint16_t i, j;
 
-  for(j=0; j<256*5; j++) { // 5 cycles of all colors on wheel
-    for(i=0; i< strip.numPixels(); i++) {
-      strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + j) & 255));
-    }
-    strip.show();
-    delay(wait);
-  }
-}
+void doBigLEDs(CRGB ledString[]) {
 
-//Theatre-style crawling lights.
-void theaterChase(uint32_t c, uint8_t wait) {
-  for (int j=0; j<10; j++) {  //do 10 cycles of chasing
-    for (int q=0; q < 3; q++) {
-      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, c);    //turn every third pixel on
+  //  if (!ledString[NUM_LEDS - 1] && ringTime[NUM_LEDS - 1] > ringTime[0]) {
+  //    currentTime = millis();
+  //    ringTime[0] = currentTime;
+  //  }
+  //
+  //  if (currentTime - ringTime[0] >= ringStartDelay && !ledString[0]) {
+  //    ledString[0].setRGB (startingColors[0], startingColors[1], startingColors[2]);
+  //  }
+  //  ledString[0].fadeToBlackBy(fadeSpeed);
+  currentTime = millis();//set the current time
+  for (int current_led = 0; current_led < NUM_LEDS; current_led++) { //for every LED...
+    //    Serial.print("Current led being updated is:"); Serial.print(current_led); Serial.print(" time is :"); Serial.println(currentTime);
+
+    ledString[current_led].fadeToBlackBy(fadeSpeed);// fade to black by FadeSpeed/256'THS
+    if (current_led != 0) {// if not the first LED in the string...
+
+
+
+
+      if (currentTime - ringTime[current_led - 1] >= ringDelay && ringSelector == current_led) { // when the timer for the previous ring has exceeded the delay time
+        ringTime[current_led] = currentTime;
+        ledString[current_led].setRGB (startingColors[0], startingColors[1], startingColors[2]);
+        if (current_led == 1) {
+          ringSelector += 6;
+        } else if (current_led==7) {
+          ringSelector += 12;
+        }else {
+          ringSelector = (ringSelector + 1) % (NUM_LEDS);
+        }
+
+
       }
-      strip.show();
 
-      delay(wait);
-
-      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, 0);        //turn every third pixel off
+      //      Serial.print("Color Values:"); Serial.print(current_led); Serial.print(" Ring Time is :"); Serial.println(ringTime[current_led]);
+      if (current_led == 1) {
+        led_string1[2] = led_string1[1]; led_string1[3] = led_string1[1]; led_string1[4] = led_string1[1]; led_string1[5] = led_string1[1]; led_string1[6] = led_string1[1];
+        ringTime[2] = ringTime[1]; ringTime[3] = ringTime[1]; ringTime[4] = ringTime[1]; ringTime[5] = ringTime[1]; ringTime[6] = ringTime[1];
+        current_led += 5;
       }
-    }
-  }
-}
 
-//Theatre-style crawling lights with rainbow effect
-void theaterChaseRainbow(uint8_t wait) {
-  for (int j=0; j < 256; j++) {     // cycle all 256 colors in the wheel
-    for (int q=0; q < 3; q++) {
-      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, Wheel( (i+j) % 255));    //turn every third pixel on
+      if (current_led == 7) {
+        for (int i = 0; i<12; i++) {
+          ledString[8+i] = ledString[7];
+          ringTime[8+i] = ringTime[7];
+        }
+        current_led += 11;
       }
-      strip.show();
+    } else {
 
-      delay(wait);
 
-      for (uint16_t i=0; i < strip.numPixels(); i=i+3) {
-        strip.setPixelColor(i+q, 0);        //turn every third pixel off
+
+      if (ringSelector == 0 && !ledString[NUM_LEDS - 1] && currentTime - ringTime[0] >= ringStartDelay) { // if the last light has turned off and the timer for the
+        //Last Led in the string has been updated more recently than
+        //the first...
+        currentTime = millis();
+        ringTime[0] = currentTime;
+        ledString[0].setRGB (startingColors[0], startingColors[1], startingColors[2]);
+        ringSelector++;
       }
+
+
+
     }
   }
+
+  Serial.print("Current time is:"); Serial.print(currentTime); Serial.print(" Ring Time is :"); Serial.println(ringTime[0]);
+  FastLED.show();
 }
 
-// Input a value 0 to 255 to get a color value.
-// The colours are a transition r - g - b - back to r.
-uint32_t Wheel(byte WheelPos) {
-  WheelPos = 255 - WheelPos;
-  if(WheelPos < 85) {
-    return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+
+
+
+void doLEDs(CRGB ledString[]) {
+
+  //  if (!ledString[NUM_LEDS - 1] && ringTime[NUM_LEDS - 1] > ringTime[0]) {
+  //    currentTime = millis();
+  //    ringTime[0] = currentTime;
+  //  }
+  //
+  //  if (currentTime - ringTime[0] >= ringStartDelay && !ledString[0]) {
+  //    ledString[0].setRGB (startingColors[0], startingColors[1], startingColors[2]);
+  //  }
+  //  ledString[0].fadeToBlackBy(fadeSpeed);
+  currentTime = millis();//set the current time
+  for (int current_led = 0; current_led < NUM_LEDS; current_led++) { //for every LED...
+    //    Serial.print("Current led being updated is:"); Serial.print(current_led); Serial.print(" time is :"); Serial.println(currentTime);
+
+    ledString[current_led].fadeToBlackBy(fadeSpeed);// fade to black by FadeSpeed/256'THS
+    if (current_led != 0) {// if not the first LED in the string...
+
+
+
+
+      if (currentTime - ringTime[current_led - 1] >= ringDelay && ringSelector == current_led) { // when the timer for the previous ring has exceeded the delay time
+        ringTime[current_led] = currentTime;
+        ledString[current_led].setRGB (startingColors[0], startingColors[1], startingColors[2]);
+        if (current_led == 1) {
+          ringSelector += 6;
+        } else {
+          ringSelector = (ringSelector + 1) % (NUM_LEDS);
+        }
+
+
+      }
+
+      //      Serial.print("Color Values:"); Serial.print(current_led); Serial.print(" Ring Time is :"); Serial.println(ringTime[current_led]);
+      if (current_led == 1) {
+        led_string1[2] = led_string1[1]; led_string1[3] = led_string1[1]; led_string1[4] = led_string1[1]; led_string1[5] = led_string1[1]; led_string1[6] = led_string1[1];
+        ringTime[2] = ringTime[1]; ringTime[3] = ringTime[1]; ringTime[4] = ringTime[1]; ringTime[5] = ringTime[1]; ringTime[6] = ringTime[1];
+        current_led += 5;
+      }
+    } else {
+
+
+
+      if (ringSelector == 0 && !ledString[NUM_LEDS - 1] && currentTime - ringTime[0] >= ringStartDelay) { // if the last light has turned off and the timer for the
+        //Last Led in the string has been updated more recently than
+        //the first...
+        currentTime = millis();
+        ringTime[0] = currentTime;
+        ledString[0].setRGB (startingColors[0], startingColors[1], startingColors[2]);
+        ringSelector++;
+      }
+
+
+
+    }
   }
-  if(WheelPos < 170) {
-    WheelPos -= 85;
-    return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
-  }
-  WheelPos -= 170;
-  return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+
+  Serial.print("Current time is:"); Serial.print(currentTime); Serial.print(" Ring Time is :"); Serial.println(ringTime[0]);
+  FastLED.show();
 }
+
+
+
+void calSpeed() {
+  long temp;
+  int tempAvg;
+  temp = map(calAvgAccel(), 10, 30, 1, 35);
+
+  Serial.print(calAvgAccel());
+
+  acceleration[currentAccInd] = temp;
+  currentAccInd = (currentAccInd + 1) % 15;
+  for (int i = 0; i < 15; i++) {
+    tempAvg += acceleration[i];
+  }
+  avgAccel = tempAvg / 15;
+  ringStartDelay = ringStartDelayInit / avgAccel;
+  fadeSpeed = fadeSpeedInit * avgAccel;
+  ringDelay = ringDelayInit / avgAccel;
+
+};
+void displaySensorDetails(void)
+{
+  sensor_t sensor;
+  sensoor.getSensor(&sensor);
+  Serial.println("------------------------------------");
+  Serial.print  ("Sensor:       "); Serial.println(sensor.name);
+  Serial.print  ("Driver Ver:   "); Serial.println(sensor.version);
+  Serial.print  ("Unique ID:    "); Serial.println(sensor.sensor_id);
+  Serial.print  ("Max Value:    "); Serial.print(sensor.max_value); Serial.println(" m/s^2");
+  Serial.print  ("Min Value:    "); Serial.print(sensor.min_value); Serial.println(" m/s^2");
+  Serial.print  ("Resolution:   "); Serial.print(sensor.resolution); Serial.println(" m/s^2");
+  Serial.println("------------------------------------");
+  Serial.println("");
+  delay(500);
+}
+
+float calAvgAccel () {
+  sensors_event_t accEvent;
+  sensoor.getEvent(&accEvent);
+
+  float x, y, z;
+  x = abs((float)accEvent.acceleration.x) + 1;
+  y = abs((float)accEvent.acceleration.y) + 1;
+  z = abs((float)accEvent.acceleration.z) + 1;
+  //  Serial.print("x: " + (String)x);
+  //  Serial.print("y: " + (String)y);
+  //  Serial.print("z: " + (String)z);
+
+  return abs(sqrt(pow(x, 2) + pow(y, 2) + (pow(z, 2))));
+}
+
